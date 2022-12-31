@@ -1,0 +1,72 @@
+- name: db configuration
+  hosts: db_server
+  become: yes
+  tasks:
+    - name: install mariadb and PyMySQL
+      yum:
+        name: 
+            - mariadb-server
+            - python3-PyMySQL
+        state: latest    
+    
+    - name: enable mariadb
+      systemd: 
+        name: mariadb
+        enabled: true
+        state: started
+
+    - name: copy the sql script
+      copy: 
+        src: /home/ec2-user/Ansible-Website-Project/db-load-script.sql
+        dest: ~/
+    
+    - name: Create password for the root user
+      mysql_user:
+        login_password: ''
+        login_user: root
+        name: root
+        password: "damla1234"
+
+    - name: copy the .my.cnf file
+      copy: 
+        src: /home/ec2-user/Ansible-Website-Project/.my.cnf
+        dest: ~/
+    
+    - name: Create db user with name 'remoteUser' and password 'damla1234' with all database privileges
+      mysql_user:
+        name: remoteUser
+        password: "damla1234"
+        login_user: "root"
+        login_password: "damla1234"
+        priv: '*.*:ALL,GRANT'
+        state: present
+        host: "{{ hostvars['web_server'].ansible_host }}"
+    
+    - name: Create database schema
+      mysql_db:
+        name: ecomdb
+        login_user: root
+        login_password: "damla1234"
+        state: present
+    
+    - name: check if the database has the table
+      shell: |
+        echo "USE ecomdb; show tables like 'products'; " | mysql
+      register: resultOfShowTables
+
+    - name: DEBUG
+      debug:
+        var: resultOfShowTables
+
+    - name: Import database table
+      mysql_db:
+        name: ecomdb   # This is the database schema name.
+        state: import  # This module is not idempotent when the state property value is import.
+        target: ~/db-load-script.sql # This script creates the products table.
+      when: resultOfShowTables.stdout == "" # This line checks if the table is already imported. If so this task doesn't run.
+      
+    - name: restart mariadb
+      become: yes
+      service: 
+        name: mariadb
+        state: restarted
